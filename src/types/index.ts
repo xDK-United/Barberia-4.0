@@ -41,3 +41,13 @@ export interface BookingData {
   customerName: string;
   customerWhatsapp: string;
 }
+
+export interface PendingMessage {
+  id: string;
+  agendamento_id: string;
+  tipo: 'confirmacao' | 'cancelamento';
+  mensagem: string;
+  enviado: boolean;
+  data_criacao: string;
+  appointment?: Appointment;
+}

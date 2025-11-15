@@ -42,7 +42,10 @@ export function BookingPage({ onNavigate, selectedServiceId }: BookingPageProps)
       const [servicesRes, settingsRes, appointmentsRes] = await Promise.all([
         supabase.from('services').select('*').eq('active', true).order('price'),
         supabase.from('business_settings').select('*').limit(1).single(),
-        supabase.from('appointments').select('*').gte('appointment_date', formatDateForDB(new Date()))
+        supabase.from('appointments')
+          .select('*')
+          .gte('appointment_date', formatDateForDB(new Date()))
+          .in('status', ['pending', 'confirmed'])
       ]);
 
       if (servicesRes.data) setServices(servicesRes.data);
@@ -120,11 +123,11 @@ export function BookingPage({ onNavigate, selectedServiceId }: BookingPageProps)
         .eq('appointment_date', dateStr)
         .eq('appointment_time', selectedTime)
         .in('status', ['pending', 'confirmed'])
-        .limit(1);
+        .maybeSingle();
 
       if (checkError) throw checkError;
 
-      if (existing && existing.length > 0) {
+      if (existing) {
         alert('Este horário não está mais disponível. Por favor, escolha outro.');
         await loadInitialData();
         setSelectedTime(null);
