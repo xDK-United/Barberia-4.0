@@ -20,6 +20,7 @@ export function AdminPage({ onNavigate }: AdminPageProps) {
   const [activeTab, setActiveTab] = useState<'appointments' | 'messages'>('appointments');
   const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
   const [editingMessageText, setEditingMessageText] = useState('');
+  const [sendingMessageId, setSendingMessageId] = useState<string | null>(null);
 
   useEffect(() => {
     if (isAuthenticated) {
@@ -123,20 +124,111 @@ export function AdminPage({ onNavigate }: AdminPageProps) {
   }
 
   async function markMessageAsSent(messageId: string) {
+    setSendingMessageId(messageId);
     try {
-      const { error } = await supabase
+      const pendingMessage = pendingMessages.find(m => m.id === messageId);
+      if (!pendingMessage) throw new Error('Mensagem não encontrada');
+
+      const appointmentId = pendingMessage.agendamento_id;
+
+      const appointment = appointments.find(a => a.id === appointmentId);
+      if (!appointment) throw new Error('Agendamento não encontrado');
+
+      if (appointment.status === 'confirmed') {
+        await supabase
+          .from('mensagens_pendentes')
+          .update({
+            enviado: true,
+            data_envio: new Date().toISOString()
+          })
+          .eq('id', messageId);
+
+        await loadPendingMessages();
+        setFeedback({ type: 'success', message: 'Mensagem marcada como enviada! (Agendamento já estava confirmado)' });
+        setTimeout(() => setFeedback(null), 3000);
+        return;
+      }
+
+      const { error: updateMessageError } = await supabase
         .from('mensagens_pendentes')
-        .update({ enviado: true })
+        .update({
+          enviado: true,
+          data_envio: new Date().toISOString()
+        })
         .eq('id', messageId);
 
-      if (error) throw error;
+      if (updateMessageError) throw updateMessageError;
+
+      const { error: updateAppointmentError } = await supabase
+        .from('appointments')
+        .update({
+          status: 'confirmed',
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', appointmentId);
+
+      if (updateAppointmentError) throw updateAppointmentError;
+
+      await loadAppointments();
       await loadPendingMessages();
-      setFeedback({ type: 'success', message: 'Mensagem marcada como enviada!' });
+      setFeedback({ type: 'success', message: 'Mensagem enviada e agendamento confirmado!' });
       setTimeout(() => setFeedback(null), 3000);
     } catch (error) {
       console.error('Error marking message as sent:', error);
       setFeedback({ type: 'error', message: 'Erro ao marcar mensagem como enviada.' });
       setTimeout(() => setFeedback(null), 3000);
+    } finally {
+      setSendingMessageId(null);
+    }
+  }
+
+  async function handleSendMessage(messageId: string, phoneNumber: string, messageText: string) {
+    setSendingMessageId(messageId);
+    try {
+      const pendingMessage = pendingMessages.find(m => m.id === messageId);
+      if (!pendingMessage) throw new Error('Mensagem não encontrada');
+
+      const appointmentId = pendingMessage.agendamento_id;
+
+      const appointment = appointments.find(a => a.id === appointmentId);
+      if (!appointment) throw new Error('Agendamento não encontrado');
+
+      if (appointment.status !== 'confirmed') {
+        const { error: updateMessageError } = await supabase
+          .from('mensagens_pendentes')
+          .update({
+            enviado: true,
+            data_envio: new Date().toISOString()
+          })
+          .eq('id', messageId);
+
+        if (updateMessageError) throw updateMessageError;
+
+        const { error: updateAppointmentError } = await supabase
+          .from('appointments')
+          .update({
+            status: 'confirmed',
+            updated_at: new Date().toISOString()
+          })
+          .eq('id', appointmentId);
+
+        if (updateAppointmentError) throw updateAppointmentError;
+
+        await loadAppointments();
+        await loadPendingMessages();
+      }
+
+      const whatsappLink = generateWhatsAppLink(phoneNumber, messageText);
+      window.open(whatsappLink, '_blank');
+
+      setFeedback({ type: 'success', message: 'Mensagem enviada e agendamento confirmado!' });
+      setTimeout(() => setFeedback(null), 3000);
+    } catch (error) {
+      console.error('Error sending message:', error);
+      setFeedback({ type: 'error', message: 'Erro ao enviar mensagem.' });
+      setTimeout(() => setFeedback(null), 3000);
+    } finally {
+      setSendingMessageId(null);
     }
   }
 
@@ -521,15 +613,14 @@ export function AdminPage({ onNavigate }: AdminPageProps) {
                               </>
                             ) : (
                               <>
-                                <a
-                                  href={generateWhatsAppLink(appointment?.customer_whatsapp || '', message.mensagem)}
-                                  target="_blank"
-                                  rel="noopener noreferrer"
-                                  className="px-3 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg text-sm font-medium transition-colors flex items-center space-x-1 flex-1 lg:flex-none justify-center"
+                                <button
+                                  onClick={() => handleSendMessage(message.id, appointment?.customer_whatsapp || '', message.mensagem)}
+                                  disabled={sendingMessageId !== null}
+                                  className="px-3 py-2 bg-green-600 hover:bg-green-700 disabled:bg-green-400 text-white rounded-lg text-sm font-medium transition-colors flex items-center space-x-1 flex-1 lg:flex-none justify-center disabled:cursor-not-allowed"
                                 >
                                   <Send className="w-4 h-4" />
-                                  <span>Enviar</span>
-                                </a>
+                                  <span>{sendingMessageId === message.id ? 'Enviando...' : 'Enviar'}</span>
+                                </button>
                                 <button
                                   onClick={() => {
                                     setEditingMessageId(message.id);
@@ -541,7 +632,9 @@ export function AdminPage({ onNavigate }: AdminPageProps) {
                                 </button>
                                 <button
                                   onClick={() => markMessageAsSent(message.id)}
-                                  className="px-3 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-medium transition-colors flex items-center space-x-1 flex-1 lg:flex-none justify-center"
+                                  disabled={sendingMessageId !== null}
+                                  className="px-3 py-2 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400 text-white rounded-lg text-sm font-medium transition-colors flex items-center space-x-1 flex-1 lg:flex-none justify-center disabled:cursor-not-allowed"
+                                  title="Marcar mensagem como enviada e confirmar agendamento"
                                 >
                                   <Check className="w-4 h-4" />
                                 </button>

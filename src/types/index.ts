@@ -49,5 +49,6 @@ export interface PendingMessage {
   mensagem: string;
   enviado: boolean;
   data_criacao: string;
+  data_envio?: string | null;
   appointment?: Appointment;
 }
