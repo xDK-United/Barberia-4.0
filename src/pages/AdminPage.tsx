@@ -79,28 +79,23 @@ export function AdminPage({ onNavigate }: AdminPageProps) {
     }
   }
 
-  async function updateAppointmentStatus(id: string, status: 'confirmed' | 'cancelled') {
+  async function cancelAppointment(id: string) {
     setUpdatingId(id);
     try {
       const { error: updateError } = await supabase
         .from('appointments')
-        .update({ status, updated_at: new Date().toISOString() })
+        .update({ status: 'cancelled', updated_at: new Date().toISOString() })
         .eq('id', id);
 
       if (updateError) throw updateError;
 
-      let messageText = '';
-      if (status === 'confirmed') {
-        messageText = 'Seu horário foi confirmado! 🎉';
-      } else {
-        messageText = 'Seu horário foi cancelado pelo barbeiro. Entre em contato para remarcar.';
-      }
+      const messageText = 'Seu horário foi cancelado pelo barbeiro. Entre em contato para remarcar.';
 
       const { error: messageError } = await supabase
         .from('mensagens_pendentes')
         .insert({
           agendamento_id: id,
-          tipo: status === 'confirmed' ? 'confirmacao' : 'cancelamento',
+          tipo: 'cancelamento',
           mensagem: messageText,
           enviado: false,
           data_criacao: new Date().toISOString()
@@ -111,12 +106,11 @@ export function AdminPage({ onNavigate }: AdminPageProps) {
       await loadAppointments();
       await loadPendingMessages();
 
-      const statusLabel = status === 'confirmed' ? 'confirmado' : 'cancelado';
-      setFeedback({ type: 'success', message: `Agendamento ${statusLabel} com sucesso! Mensagem adicionada à fila.` });
+      setFeedback({ type: 'success', message: 'Agendamento cancelado com sucesso! Mensagem adicionada à fila.' });
       setTimeout(() => setFeedback(null), 3000);
     } catch (error) {
-      console.error('Error updating appointment:', error);
-      setFeedback({ type: 'error', message: 'Erro ao atualizar agendamento. Tente novamente.' });
+      console.error('Error cancelling appointment:', error);
+      setFeedback({ type: 'error', message: 'Erro ao cancelar agendamento. Tente novamente.' });
       setTimeout(() => setFeedback(null), 3000);
     } finally {
       setUpdatingId(null);
@@ -126,29 +120,6 @@ export function AdminPage({ onNavigate }: AdminPageProps) {
   async function markMessageAsSent(messageId: string) {
     setSendingMessageId(messageId);
     try {
-      const pendingMessage = pendingMessages.find(m => m.id === messageId);
-      if (!pendingMessage) throw new Error('Mensagem não encontrada');
-
-      const appointmentId = pendingMessage.agendamento_id;
-
-      const appointment = appointments.find(a => a.id === appointmentId);
-      if (!appointment) throw new Error('Agendamento não encontrado');
-
-      if (appointment.status === 'confirmed') {
-        await supabase
-          .from('mensagens_pendentes')
-          .update({
-            enviado: true,
-            data_envio: new Date().toISOString()
-          })
-          .eq('id', messageId);
-
-        await loadPendingMessages();
-        setFeedback({ type: 'success', message: 'Mensagem marcada como enviada! (Agendamento já estava confirmado)' });
-        setTimeout(() => setFeedback(null), 3000);
-        return;
-      }
-
       const { error: updateMessageError } = await supabase
         .from('mensagens_pendentes')
         .update({
@@ -159,19 +130,8 @@ export function AdminPage({ onNavigate }: AdminPageProps) {
 
       if (updateMessageError) throw updateMessageError;
 
-      const { error: updateAppointmentError } = await supabase
-        .from('appointments')
-        .update({
-          status: 'confirmed',
-          updated_at: new Date().toISOString()
-        })
-        .eq('id', appointmentId);
-
-      if (updateAppointmentError) throw updateAppointmentError;
-
-      await loadAppointments();
       await loadPendingMessages();
-      setFeedback({ type: 'success', message: 'Mensagem enviada e agendamento confirmado!' });
+      setFeedback({ type: 'success', message: 'Mensagem marcada como enviada!' });
       setTimeout(() => setFeedback(null), 3000);
     } catch (error) {
       console.error('Error marking message as sent:', error);
@@ -185,43 +145,22 @@ export function AdminPage({ onNavigate }: AdminPageProps) {
   async function handleSendMessage(messageId: string, phoneNumber: string, messageText: string) {
     setSendingMessageId(messageId);
     try {
-      const pendingMessage = pendingMessages.find(m => m.id === messageId);
-      if (!pendingMessage) throw new Error('Mensagem não encontrada');
+      const { error: updateMessageError } = await supabase
+        .from('mensagens_pendentes')
+        .update({
+          enviado: true,
+          data_envio: new Date().toISOString()
+        })
+        .eq('id', messageId);
 
-      const appointmentId = pendingMessage.agendamento_id;
+      if (updateMessageError) throw updateMessageError;
 
-      const appointment = appointments.find(a => a.id === appointmentId);
-      if (!appointment) throw new Error('Agendamento não encontrado');
-
-      if (appointment.status !== 'confirmed') {
-        const { error: updateMessageError } = await supabase
-          .from('mensagens_pendentes')
-          .update({
-            enviado: true,
-            data_envio: new Date().toISOString()
-          })
-          .eq('id', messageId);
-
-        if (updateMessageError) throw updateMessageError;
-
-        const { error: updateAppointmentError } = await supabase
-          .from('appointments')
-          .update({
-            status: 'confirmed',
-            updated_at: new Date().toISOString()
-          })
-          .eq('id', appointmentId);
-
-        if (updateAppointmentError) throw updateAppointmentError;
-
-        await loadAppointments();
-        await loadPendingMessages();
-      }
+      await loadPendingMessages();
 
       const whatsappLink = generateWhatsAppLink(phoneNumber, messageText);
       window.open(whatsappLink, '_blank');
 
-      setFeedback({ type: 'success', message: 'Mensagem enviada e agendamento confirmado!' });
+      setFeedback({ type: 'success', message: 'Mensagem enviada!' });
       setTimeout(() => setFeedback(null), 3000);
     } catch (error) {
       console.error('Error sending message:', error);
@@ -498,17 +437,10 @@ export function AdminPage({ onNavigate }: AdminPageProps) {
                           </div>
                         </div>
 
-                        {appointment.status === 'pending' && (
+                        {appointment.status === 'confirmed' && (
                           <div className="flex flex-row lg:flex-col gap-2">
                             <button
-                              onClick={() => updateAppointmentStatus(appointment.id, 'confirmed')}
-                              disabled={updatingId !== null}
-                              className="flex-1 lg:flex-none px-4 py-2 bg-green-600 hover:bg-green-700 disabled:bg-green-400 text-white rounded-lg text-sm font-medium transition-colors disabled:cursor-not-allowed"
-                            >
-                              {updatingId === appointment.id ? 'Processando...' : 'Confirmar'}
-                            </button>
-                            <button
-                              onClick={() => updateAppointmentStatus(appointment.id, 'cancelled')}
+                              onClick={() => cancelAppointment(appointment.id)}
                               disabled={updatingId !== null}
                               className="flex-1 lg:flex-none px-4 py-2 bg-red-600 hover:bg-red-700 disabled:bg-red-400 text-white rounded-lg text-sm font-medium transition-colors disabled:cursor-not-allowed"
                             >

@@ -45,7 +45,7 @@ export function BookingPage({ onNavigate, selectedServiceId }: BookingPageProps)
         supabase.from('appointments')
           .select('*')
           .gte('appointment_date', formatDateForDB(new Date()))
-          .in('status', ['pending', 'confirmed'])
+          .eq('status', 'confirmed')
       ]);
 
       if (servicesRes.data) setServices(servicesRes.data);
@@ -122,7 +122,7 @@ export function BookingPage({ onNavigate, selectedServiceId }: BookingPageProps)
         .select('id')
         .eq('appointment_date', dateStr)
         .eq('appointment_time', selectedTime)
-        .in('status', ['pending', 'confirmed'])
+        .eq('status', 'confirmed')
         .maybeSingle();
 
       if (checkError) throw checkError;
@@ -143,12 +143,24 @@ export function BookingPage({ onNavigate, selectedServiceId }: BookingPageProps)
           appointment_date: dateStr,
           appointment_time: selectedTime,
           service_price: selectedService.price,
-          status: 'pending'
+          status: 'confirmed'
         })
         .select()
         .single();
 
       if (error) throw error;
+
+      if (data) {
+        await supabase
+          .from('mensagens_pendentes')
+          .insert({
+            agendamento_id: data.id,
+            tipo: 'confirmacao',
+            mensagem: 'Seu horário foi confirmado! 🎉',
+            enviado: false,
+            data_criacao: new Date().toISOString()
+          });
+      }
 
       onNavigate('confirmation', {
         service: selectedService,
